@@ -134,7 +134,125 @@ __global__ void adamw_kernel_3(
         param.x -=learning_rate*(m_hat_x/(sqrtf(v_hat_x)+eps)+weight_decay*param.x);
     }
 }
+
+void adamw_dispatch1(float *params_memory, const float *grads_memory, float *m_memory,
+                     float *v_memory, long num_parameters, float learning_rate, float beta1,
+                     float beta2, float beta1_correction, float beta2_correction, float eps,
+                     float weight_decay) {
+    unsigned int block_size = 512;
+    unsigned int num_blocks = ceil_div(num_parameters, (long)block_size);
+                        adamw_kernel_1<<<num_blocks, block_size>>>(params_memory, grads_memory, m_memory, v_memory,
+                                                    num_parameters, learning_rate, beta1, beta2,
+                                                    beta1_correction, beta2_correction, eps,
+                                                    weight_decay);
+}
+
+void adamw_dispatch2(float *params_memory, const float *grads_memory, float *m_memory,
+                     float *v_memory, long num_parameters, float learning_rate, float beta1,
+                     float beta2, float beta1_correction, float beta2_correction, float eps,
+                     float weight_decay) {
+
+    unsigned int block_size = 512;
+    // 分配512个线程做一个线程块
+    unsigned int num_blocks = ceil_div(num_parameters, (long)block_size);
+    // 启动核函数，线程块数量，单个线程块线程数量
+    adamw_kernel_2<<<num_blocks, block_size>>>(
+        params_memory, grads_memory, m_memory, v_memory, num_parameters, learning_rate, beta1,
+        beta2, beta1_correction, beta2_correction, eps, weight_decay);
+}
+
+void adamw(int kernel_num, float *params_memory, const float *grads_memory, float *m_memory,
+           float *v_memory, int t, long num_parameters, float learning_rate = 1e-3,
+           float beta1 = 0.9, float beta2 = 0.999, float eps = 1e-8, float weight_decay = 0.0) {
+    float beta1_correction = 1.0f - powf(beta1, t);
+    float beta2_correction = 1.0f - powf(beta2, t);
+    if (kernel_num == 1) {
+        adamw_dispatch1(params_memory, grads_memory, m_memory, v_memory, num_parameters,
+                        learning_rate, beta1, beta2, beta1_correction, beta2_correction, eps,
+                        weight_decay);
+    } else if (kernel_num == 2) {
+        adamw_dispatch2(params_memory, grads_memory, m_memory, v_memory, num_parameters,
+                        learning_rate, beta1, beta2, beta1_correction, beta2_correction, eps,
+                        weight_decay);
+    } else {
+        printf("Error: Invalid kernel number %d\n", kernel_num);
+        exit(1);
+    }
+}
+
 int main(int argc, char** argv)
 {
+    srand(0);
+    const long num_parameters =1048576;
+    const int t = 10;
+    const float learning_rate = 1e-3f;
+    const float beta1 = 0.9f;
+    const float beta2 = 0.999f;
+    const float eps = 1e-8f;
+    const float weight_decay = 0.0f;
+
+    int deviceIdx = 0;
+    //指定使用的GPU设备编号0
+    CUDACHECK(cudaSetDevice(deviceIdx));
+    cudaDeviceProp deviceProp;
+    //获取显卡型号
+    CUDACHECK(cudaGetDeviceProperties(&deviceProp, deviceIdx));
+    printf("Using GPU device %d: %s\n", deviceIdx, deviceProp.name);
+    // create random data on host (to be used for the CPU reference implementation)
+    float *params_memory = make_random_float(num_parameters);
+    float *grads_memory = make_random_float(num_parameters);
+    float *m_memory = make_random_float_01(num_parameters);
+    float *v_memory = make_random_float_01(num_parameters);
+
+    float* d_params_memory;
+    float* d_grads_memory; 
+    float* d_m_memory;
+    float* d_v_memory;
+    CUDACHECK(cudaMalloc(&d_params_memory,num_parameters*sizeof(float)));
+    CUDACHECK(cudaMalloc(&d_grads_memory,num_parameters*sizeof(float)));
+    CUDACHECK(cudaMalloc(&d_m_memory,num_parameters*sizeof(float)));
+    CUDACHECK(cudaMalloc(&d_v_memory,num_parameters*sizeof(float)));
+    CUDACHECK(cudaMemcpy(d_params_memory,params_memory,num_parameters*sizeof(float),cudaMemcpyHostToDevice));
+    CUDACHECK(cudaMemcpy(d_grads_memory,grads_memory,num_parameters*sizeof(float),cudaMemcpyHostToDevice));
+    CUDACHECK(cudaMemcpy(d_m_memory,m_memory,num_parameters*sizeof(float),cudaMemcpyHostToDevice));
+    CUDACHECK(cudaMemcpy(d_v_memory,v_memory,num_parameters*sizeof(float),cudaMemcpyHostToDevice));
+
+    int kernel_num = 1;
+    if (argc > 1) {
+        kernel_num = atoi(argv[1]);
+    }
+    printf("Using kernel %d\n", kernel_num);
+
+    clock_t start =clock();
+     adamw_cpu(params_memory, grads_memory, m_memory, v_memory, t, num_parameters);
+    clock_t end = clock();
+    double elapsed_time_cpu = (double)(end - start) / CLOCKS_PER_SEC;
+    adamw(kernel_num, d_params_memory, d_grads_memory, d_m_memory, d_v_memory, t, num_parameters);
+
+    printf("Checking correctness...\n");
+    printf("parameters:\n");
+    validate_result(d_params_memory, params_memory, "params_memory", num_parameters);
+    printf("first moment:\n");
+    validate_result(d_m_memory, m_memory, "m_memory", num_parameters);
+    printf("second moment:\n");
+    validate_result(d_v_memory, v_memory, "v_memory", num_parameters);
+    printf("All results match.\n\n");
+
+    // now benchmark the kernel
+    int repeat_times = 1000;
+    float elapsed_time = benchmark_kernel(repeat_times, adamw, kernel_num,
+      d_params_memory, d_grads_memory, d_m_memory, d_v_memory, t, num_parameters,
+      learning_rate, beta1, beta2, eps, weight_decay);
+    printf("time gpu %.4f ms\n", elapsed_time);
+    printf("time cpu %.4f ms\n", elapsed_time_cpu);
+
+    free(params_memory);
+    free(grads_memory);
+    free(m_memory);
+    free(v_memory);
+    CUDACHECK(cudaFree(d_params_memory)); 
+    CUDACHECK(cudaFree(d_grads_memory));
+    CUDACHECK(cudaFree(d_m_memory));
+    CUDACHECK(cudaFree(d_v_memory));
     return 0;
 }

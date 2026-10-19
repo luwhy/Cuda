@@ -104,24 +104,24 @@ void validate_result(
 }
 
 template <typename Kernel, class... KernelArgs>
-float benchmark(int repeats, Kernel kernel, KernelArgs&&... args)
+float benchmark_kernel(int repeats, Kernel kernel, KernelArgs&&... args)
 {
     cudaEvent_t start, stop;
     //创建计时操作
-    cudaCheck(cudaEventCreate(&start));
-    cudaCheck(cudaEventCreate(&stop));
+    CUDACHECK(cudaEventCreate(&start));
+    CUDACHECK(cudaEventCreate(&stop));
     //插入标记
-    cudaCheck(cudaEventRecord(start, nullptr));
+    CUDACHECK(cudaEventRecord(start, nullptr));
     for (int i = 0; i < repeats; ++i) {
         kernel(std::forward<KernelArgs>(args)...);
     }
-    cudaCheck(cudaEventRecord(stop, nullptr));
+    CUDACHECK(cudaEventRecord(stop, nullptr));
     //阻塞 CPU，直到该事件被触发（即流执行到该事件的位置）
-    cudaCheck(cudaEventSynchronize(start));
-    cudaCheck(cudaEventSynchronize(stop));
+    CUDACHECK(cudaEventSynchronize(start));
+    CUDACHECK(cudaEventSynchronize(stop));
     float elapsed;
     //计算两个事件之间经过的时间，单位是毫秒。
-    cudaCheck(cudaEventElapsedTime(&elapsed, start, stop));
+    CUDACHECK(cudaEventElapsedTime(&elapsed, start, stop));
     CUDACHECK(cudaEventDestroy(start));
     CUDACHECK(cudaEventDestroy(stop));
     return elapsed / repeats;
