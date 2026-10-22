@@ -3,7 +3,7 @@
 #include <time.h>
 #include <cuda_runtime.h>
 #include "common.h"
-
+#include<chrono>
 void adamw_cpu(
     float* params_memory,
     const float* grads_memory,
@@ -141,10 +141,10 @@ void adamw_dispatch1(float *params_memory, const float *grads_memory, float *m_m
                      float weight_decay) {
     unsigned int block_size = 512;
     unsigned int num_blocks = ceil_div(num_parameters, (long)block_size);
-                        adamw_kernel_1<<<num_blocks, block_size>>>(params_memory, grads_memory, m_memory, v_memory,
-                                                    num_parameters, learning_rate, beta1, beta2,
-                                                    beta1_correction, beta2_correction, eps,
-                                                    weight_decay);
+    adamw_kernel_1<<<num_blocks, block_size>>>(
+        params_memory, grads_memory, m_memory, v_memory, num_parameters, learning_rate, beta1,
+        beta2, beta1_correction, beta2_correction, eps, weight_decay);
+    CUDACHECK(cudaGetLastError());
 }
 
 void adamw_dispatch2(float *params_memory, const float *grads_memory, float *m_memory,
@@ -159,6 +159,7 @@ void adamw_dispatch2(float *params_memory, const float *grads_memory, float *m_m
     adamw_kernel_2<<<num_blocks, block_size>>>(
         params_memory, grads_memory, m_memory, v_memory, num_parameters, learning_rate, beta1,
         beta2, beta1_correction, beta2_correction, eps, weight_decay);
+    CUDACHECK(cudaGetLastError());
 }
 
 void adamw(int kernel_num, float *params_memory, const float *grads_memory, float *m_memory,
@@ -223,10 +224,10 @@ int main(int argc, char** argv)
     }
     printf("Using kernel %d\n", kernel_num);
 
-    clock_t start =clock();
+    auto cpu_start = std::chrono::high_resolution_clock::now();
      adamw_cpu(params_memory, grads_memory, m_memory, v_memory, t, num_parameters);
-    clock_t end = clock();
-    double elapsed_time_cpu = (double)(end - start) / CLOCKS_PER_SEC;
+    auto cpu_end = std::chrono::high_resolution_clock::now();
+    double elapsed_time_cpu = std::chrono::duration_cast<std::chrono::microseconds>(cpu_end - cpu_start).count() / 1000.0;
     adamw(kernel_num, d_params_memory, d_grads_memory, d_m_memory, d_v_memory, t, num_parameters);
 
     printf("Checking correctness...\n");

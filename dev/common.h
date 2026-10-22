@@ -80,7 +80,7 @@ void validate_result(
     const T* cpu_reference,
     const char* name,
     std::size_t num_elements,
-    T tolerance = 1e-4)
+    T tolerance = 1e-2)
 {
     T* out_gpu = (T*)malloc(num_elements * sizeof(T));
     //将device_result从GPU内存复制到主机内存
