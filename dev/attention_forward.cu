@@ -77,9 +77,26 @@ void attention_forward_cpu(float *out, float *preatt, float *att, float *inp, in
         }
     }
 }
-
-void attention_backward_cpu(float *output, float *preatt, float *att, float *inp, int B, int T,
-                            int C, int NH) {}
+//其实就是算每个out和目标的误差
+void attention_forward_cpu(float* out, float* preatt, float* att,
+    float* inp,int B, int T, int C, int NH){
+    int C3 = C * 3;
+    int hs = C / NH;
+    float scale = 1.0 / sqrtf(hs);
+    for (int b = 0;b < B;b++) {
+        for (int t = 0;t < T;t++) {
+            for (int h = 0;h < NH;++h) {
+                float* query_t = inp + b * T * C3 + t * C3 + h * hs;
+                float* preatt_bth = preatt + b * NH * T * T + h * T * T + t * T;//原始打分
+                float* att_bth = att + b * NH * T * T + h * T * T + t * T; //最终概率权重
+                float maxval = -10000.0f;
+                for(int t2=0;t2<T;t2++){
+                    float* key_t2 = inp + b * T * C3 + t2 * C3 + h * hs + C;
+                }
+            }
+        }
+    }
+}
 int main(int argc, char **argv) { 
     srand(0);
     int B = 4;
@@ -102,4 +119,21 @@ int main(int argc, char **argv) {
     float *vaccum = (float *)malloc(B * T * C * sizeof(float));
     float *out = (float *)malloc(B * T * C * sizeof(float));
     attention_forward_cpu(out, preatt, att, inp, B, T, C, NH);
+    float *d_inp,*d_qkvr, *d_preatt, *d_att, *d_vaccum, *d_out;
+    CUDACHECK(cudaMalloc(&d_inp, B*T*3*C*sizeof(float)));
+    CUDACHECK(cudaMalloc(&d_qkvr, B*T*3*C*sizeof(float)));
+    CUDACHECK(cudaMalloc(&d_preatt, B*T*NH*T*sizeof(float)));
+    CUDACHECK(cudaMalloc(&d_att, B*NH*T*T*sizeof(float)));
+    CUDACHECK(cudaMalloc(&d_vaccum, B*T*C*sizeof(float)));
+    CUDACHECK(cudaMalloc(&d_out, B*T*C*sizeof(float)));
+    CUDACHECK(cudaMemcpy(d_inp,inp,B*T*3*C*sizeof(float),cudaMemcpyHostToDevice));
+    printf("Checking the forward pass...");
+    printf("[preatt]\n");
+    attetn
+    free(inp);
+    free(qkvr);
+    free(preatt);
+    free(att);
+    free(vaccum);
+    free(out);
 }
