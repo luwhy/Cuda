@@ -80,6 +80,14 @@ void attention_forward_cpu(float *out, float *preatt, float *att, float *inp, in
 
 
 //其实就是算每个out和目标的误差
+//d其实表示梯度，不带d表示前向传播特征
+//dinp：输入张量 inp 的梯度。形状是 (B, T, 3C)。这个函数算出来的 Q、K、V 的误差，最终都要累加到这块内存里
+//dpreatt：Softmax 之前（原始打分）的梯度。形状 (B, NH, T, T)。
+//datt：Softmax 之后（概率权重）的梯度。形状 (B, NH, T, T)。
+//dout整个 Attention 模块输出的梯度。形状 (B, T, C)。这是上一层传回来的误差。
+// inp：前向传播时的原始输入（包含 Q, K, V）。反向传播需要用到前向时的值来算导数。
+// att：前向传播时算出的注意力概率矩阵（Softmax 后的结果）。算 Softmax 导数必须用它。
+// B, T, C, NH：批次大小、序列长度、总特征维度、头数。
 void attention_backward_cpu(float* dinp,float* dpreatt,float*datt,
     float*dout,float* inp,float*att,int B,int T,int C, int NH){
     // inp/dinp are (B, T, 3C) Q,K,V
@@ -114,12 +122,24 @@ void attention_backward_cpu(float* dinp,float* dpreatt,float*datt,
                     }
                 }
                 for(int t2=0;t2<=t;t2++){
-                    
+                    float* key_t2 = inp + b * T * 3 * C + t2 * 3 * C + h * hs + C;
+                    float* dkey_t2 = dinp + b * T * 3 * C + t2 * 3 * C + h * hs + C;
+                    for(int i=0;i<hs;++i){
+                        dquery_t[i]+=key_t2[i]*dpreatt_bth[t2];
+                        dkey_t2[i]+=query_t[i]*dpreatt_bth[t2];
+                    }
                 }
             }
         }
     }
 }
+
+__global__ void permute_kernel(float* q, float* k, float* v, const float* inp, int B, int T, int C, int NH, int d) {
+
+}
+
+
+
 int main(int argc, char **argv) { 
     srand(0);
     int B = 4;
