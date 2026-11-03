@@ -77,21 +77,44 @@ void attention_forward_cpu(float *out, float *preatt, float *att, float *inp, in
         }
     }
 }
+
+
 //其实就是算每个out和目标的误差
-void attention_forward_cpu(float* out, float* preatt, float* att,
-    float* inp,int B, int T, int C, int NH){
-    int C3 = C * 3;
-    int hs = C / NH;
+void attention_backward_cpu(float* dinp,float* dpreatt,float*datt,
+    float*dout,float* inp,float*att,int B,int T,int C, int NH){
+    // inp/dinp are (B, T, 3C) Q,K,V
+    // att/datt/dpreatt are (B, NH, T, T)
+    // dout is (B, T, C)
+    int C3 = C*3;
+    int hs = C/NH;
     float scale = 1.0 / sqrtf(hs);
-    for (int b = 0;b < B;b++) {
-        for (int t = 0;t < T;t++) {
-            for (int h = 0;h < NH;++h) {
-                float* query_t = inp + b * T * C3 + t * C3 + h * hs;
-                float* preatt_bth = preatt + b * NH * T * T + h * T * T + t * T;//原始打分
-                float* att_bth = att + b * NH * T * T + h * T * T + t * T; //最终概率权重
-                float maxval = -10000.0f;
-                for(int t2=0;t2<T;t2++){
-                    float* key_t2 = inp + b * T * C3 + t2 * C3 + h * hs + C;
+    for(int b=0;b<B;b++){
+        for(int t=0;t<T;t++){
+            for(int h=0;h<NH;h++){
+                float* att_bth = att + b * NH * T * T + h * T * T + t * T;
+                float* datt_bth = datt + b * NH * T * T + h * T * T + t * T;
+                float* dpreatt_bth = dpreatt + b * NH * T * T + h * T * T + t * T;
+                float* dquery_t = dinp + b * T * 3 * C + t * 3 * C + h * hs;
+                float* query_t = inp + b * T * 3 * C + t * 3 * C + h * hs;
+
+                float* dout_bth = dout + b * T * C + t * C + h * hs;
+                for (int t2 = 0;t2 < T;t2++) {
+                    float* value_t2 = inp + b * T * 3 * C + t2 * 3 * C + h * hs + C * 2;
+                    float* dvalue_t2 = dinp + b * T * 3 * C + t2 * 3 * C + h * hs + C * 2;
+                    for (int i = 0; i < hs;++i) {
+                        datt_bth[t2] += value_t2[i] * dout_bth[i];
+                        dvalue_t2[i] += att_bth[t2] * dout_bth[i];
+                    }
+                }
+                for (int t2 = 0;t2 <= t;++t2) {
+                    for (int t3 = 0;t3 < t;t3++) {
+                        float  indicator = t2 == t3 ? 1.0f : 0.0f;
+                        float local_derivative = att_bth[t2] * (indicator - att_bth[t3]);
+                        dpreatt_bth[t3] += scale * local_derivative * datt_bth[t2];
+                    }
+                }
+                for(int t2=0;t2<=t;t2++){
+                    
                 }
             }
         }
@@ -129,11 +152,26 @@ int main(int argc, char **argv) {
     CUDACHECK(cudaMemcpy(d_inp,inp,B*T*3*C*sizeof(float),cudaMemcpyHostToDevice));
     printf("Checking the forward pass...");
     printf("[preatt]\n");
-    attetn
+    
+    float * dout =make_random_float(B*T*C);
+    float * dinp =make_zeros_float(B*T*3*C);
+    float * dpreatt =make_zeros_float(B*NH*T*T);
+    float * datt =make_zeros_float(B*NH*T*T);
+    attention_backward_cpu(dinp,dpreatt,datt,dout,inp,att,B,T,C,NH);
+    
+    
     free(inp);
     free(qkvr);
     free(preatt);
     free(att);
     free(vaccum);
     free(out);
+    CUDACHECK(cudaFree(d_inp));
+    CUDACHECK(cudaFree(d_qkvr));
+    CUDACHECK(cudaFree(d_preatt));
+    CUDACHECK(cudaFree(d_att));
+    CUDACHECK(cudaFree(d_vaccum));
+    CUDACHECK(cudaFree(d_out));
+    cublasDestroy(cublas_handle);
+    return 0;
 }
