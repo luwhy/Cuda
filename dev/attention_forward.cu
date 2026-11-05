@@ -149,6 +149,44 @@ __global__ void permute_kernel(float *q, float *k, float *v, const float *inp, i
     }
 }
 
+
+__global__ void permute_kernel_backward(float* dinp, const float* dq, const float* dk, const float* dv, int B, int N, int NH, int d)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < B * N * NH * d) {
+        int b = idx / (N * NH * d);
+        int rest =idx%(N*NH*d);
+        int nh_ =rest/(N*d);
+        rest = rest%(N*d);
+        int n = rest/d;
+        int d_ = rest%d;
+        int inp_idx = (b * N * 3 * NH * d) + (n * 3 * NH * d) + (0 * NH * d) + (nh_ * d) + d_;
+        dinp[inp_idx] += dq[idx];
+        dinp[inp_idx + NH * d] = dk[idx];
+        dinp[inp_idx + 2 * NH * d] = dv[idx];
+    }
+}
+
+__global__ void unpermute_kernel(float* dinp, const float* dout, int B ,int N,int NH,int d){
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < B * NH * N * d) {
+        int b = idx / (NH * N * d);
+        int rest = idx % (NH * N * d);
+        int nh_ = rest / (N * d);
+        rest = rest % (N * d);
+        int n = rest / d;
+        int d_ = rest % d;
+        int other_idx = (b * NH * N * d) + (n * NH * d) + (nh_ * d) + d_;
+        dinp[idx] += dout[other_idx];
+    }
+}
+
+__device__ float& vec_at(float4& vec, int index) {
+    return reinterpret_cast<float*>(&vec)[index];
+}
+
+
+
 void attention_forward(float *out, float *vaccum, float *qkvr, float *preatt, float *att,
                        const float *inp, int B, int T, int C, int NH, const int block_size) {
     int HS = C / NH;
